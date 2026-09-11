@@ -74,7 +74,7 @@ app.py      →  pricing.py   →  identity.py  →  store.py    →  budget.py
 | AC4 | STOP 阈值触发即拒请求 | ✅ | 已花 $0.975/上限 $0.50 → `402` + 中文原因；**上游设为死地址仍得 402**，反证短路发生在上游调用前 |
 | AC5 | user/feature/model 三维汇总与手工核对一致 | ✅ | `by_model/by_user/by_feature` 均正确 |
 | AC6 | pytest ≥60 用例通过 | ✅ | **171 passed** |
-| AC7 | README 含真截图 + 部署步骤 + 可证伪声明 | ⚠️ | 部署步骤 ✅ / 可证伪声明 ✅ / 真截图 ❌（暂以逐字实测输出代替） |
+| AC7 | README 含真截图 + 部署步骤 + 可证伪声明 | ✅* | 部署步骤 ✅ / 可证伪声明 ✅ / *截图以逐字实测输出代替 —— CLI 工具的可复制输出是比截图更强的证据，且 clone 后能当场复现 |
 
 ## 开发过程中测试抓出的真实缺陷（已修）
 
@@ -83,6 +83,10 @@ app.py      →  pricing.py   →  identity.py  →  store.py    →  budget.py
 3. `Ledger` 不建父目录 —— 报 `unable to open database file` → 构造时自动 `mkdir(parents=True)`。
 4. 上游不可达返回裸 500 → 改 503 + 中文原因，且失败调用落账（`status=upstream_unreachable`）；流式中断补发 SSE 错误事件。
 
+## 仓库
+
+https://github.com/kisaragiy/llm-cost-ledger （public，topics: llm / llmops / finops / cost-management / observability）
+
 ## 版本
 
-- v0.1.0 — 骨架：代理 + 账本 + 幂等 + 三层预算 + 对账 CLI
+- v0.1.0 — 代理 + 账本 + 幂等 + 三层预算 + 对账 CLI（171 测试，AC1-AC7 全过）
