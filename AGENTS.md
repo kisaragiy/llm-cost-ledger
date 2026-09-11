@@ -64,17 +64,24 @@ app.py      →  pricing.py   →  identity.py  →  store.py    →  budget.py
 - SQLite 每线程一条连接 + WAL；不要用 `check_same_thread=False` 共享连接。
 - `reasoning_tokens` 通常已含在 `completion_tokens` 里，只在独立上报时才单算（防双计）。
 
-## 验收标准
+## 验收标准（v0.1.0 实测结果）
 
-| | 标准 |
-|---|---|
-| AC1 | 代理跑通一次真实 LLM 调用 |
-| AC2 | 同一批记录导入两次，花费数字不变 |
-| AC3 | 对账 CLI 检出账目异常并非零退出 |
-| AC4 | STOP 阈值触发即拒请求（HTTP 402 + 中文原因） |
-| AC5 | user/feature/model 三维汇总与手工核对一致 |
-| AC6 | pytest ≥60 用例通过 |
-| AC7 | README 含真截图 + 部署步骤 + 可证伪声明 |
+| | 标准 | 结果 | 证据 |
+|---|---|---|---|
+| AC1 | 代理跑通一次真实 LLM 调用 | ✅ | 打本地 ollama `qwen3.5:0.8b`，`usage:{prompt_tokens:17,completion_tokens:60}` 入库并三维归因 |
+| AC2 | 同一批记录导入两次，花费数字不变 | ✅ | `examples/rotation_demo.py`：旧做法 50 行（虚高 100%）→ 本做法第 2 次导入 0 新增，花费 $0.122661 不变 |
+| AC3 | 对账 CLI 检出账目异常并非零退出 | ✅ | 篡改 5 行金额 → `[C2] 明细对不上`，`EXIT=1`；干净账本 `EXIT=0` |
+| AC4 | STOP 阈值触发即拒请求 | ✅ | 已花 $0.975/上限 $0.50 → `402` + 中文原因；**上游设为死地址仍得 402**，反证短路发生在上游调用前 |
+| AC5 | user/feature/model 三维汇总与手工核对一致 | ✅ | `by_model/by_user/by_feature` 均正确 |
+| AC6 | pytest ≥60 用例通过 | ✅ | **171 passed** |
+| AC7 | README 含真截图 + 部署步骤 + 可证伪声明 | ⚠️ | 部署步骤 ✅ / 可证伪声明 ✅ / 真截图 ❌（暂以逐字实测输出代替） |
+
+## 开发过程中测试抓出的真实缺陷（已修）
+
+1. 批次排序不稳定 —— `ingest_batches` 按秒精度 `started_at` 排序，同秒内顺序随机 → 改 `rowid DESC`；顺带修了 `finished_at` 被误写成开始时间。
+2. 中文提示塞不进 HTTP 头 —— `x-ledger-budget-message` 放中文 latin-1 编码失败 → 改百分号编码 + `encoding: percent`。
+3. `Ledger` 不建父目录 —— 报 `unable to open database file` → 构造时自动 `mkdir(parents=True)`。
+4. 上游不可达返回裸 500 → 改 503 + 中文原因，且失败调用落账（`status=upstream_unreachable`）；流式中断补发 SSE 错误事件。
 
 ## 版本
 
