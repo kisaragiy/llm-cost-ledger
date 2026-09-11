@@ -145,7 +145,7 @@ HTTP_CODE=503
 git clone https://github.com/kisaragiy/llm-cost-ledger.git
 cd llm-cost-ledger
 uv venv --python 3.11 .venv
-uv pip install --python .venv/Scripts/python.exe -e .
+uv pip install --python .venv/Scripts/python.exe -e ".[dev]"   # 只跑服务可去掉 [dev]
 
 # 2. 配置
 cp .env.example .env
@@ -185,8 +185,9 @@ ledger pricing                              # 查看价格表
 ## 测试
 
 ```bash
+uv pip install --python .venv/Scripts/python.exe -e ".[dev]"   # pytest 在 dev extra 里
 .venv/Scripts/python.exe -m pytest tests/ -q
-# 171 passed
+# 171 passed in 4.52s
 ```
 
 覆盖：身份键（含行号位移不变性）、计费口径（缓存/reasoning 不重复计价）、
