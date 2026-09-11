@@ -1,6 +1,6 @@
 [project]
 name = "llm-cost-ledger"
-version = "0.1.0"
+version = "0.2.0"
 description = "可审计的 LLM 成本账本：成本归因 + 预算熔断"
 requires-python = ">=3.10"
 dependencies = [

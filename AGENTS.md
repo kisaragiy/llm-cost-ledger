@@ -34,6 +34,9 @@ app.py      →  pricing.py   →  identity.py  →  store.py    →  budget.py
 | `app.py` | FastAPI：代理 + 账本 API |
 | `reconcile.py` | 对账 CLI，五道检查，不过则非零退出 |
 | `cli.py` | 命令行入口 |
+| `scripts/verify_claims.py` | 逐条执行 README 的可证伪声明，任一条不成立则非零退出（CI 的 claims 任务） |
+| `Dockerfile` / `docker-compose.yml` | 多阶段构建、非 root、healthcheck；一行起服务 |
+| `.github/workflows/ci.yml` | 三个 job：测试矩阵 / 声明验证 / 镜像构建+容器健康检查 |
 
 ## ADR
 
@@ -90,3 +93,4 @@ https://github.com/kisaragiy/llm-cost-ledger （public，topics: llm / llmops / 
 ## 版本
 
 - v0.1.0 — 代理 + 账本 + 幂等 + 三层预算 + 对账 CLI（171 测试，AC1-AC7 全过）
+- v0.2.0 — 容器化（多阶段 / 非 root / healthcheck）+ GitHub Actions CI + `scripts/verify_claims.py`（把 README 可证伪声明编译成 CI 任务）

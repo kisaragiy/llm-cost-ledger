@@ -1,5 +1,9 @@
 # llm-cost-ledger
 
+[![CI](https://github.com/kisaragiy/llm-cost-ledger/actions/workflows/ci.yml/badge.svg)](https://github.com/kisaragiy/llm-cost-ledger/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)
+
 **LLM 成本账本 · 成本归因 + 预算熔断**
 
 市面上的 LLM 成本工具大多在解决「花了多少」。这个项目解决的是另一个问题：**账目凭什么可信**。
@@ -156,6 +160,16 @@ cp .env.example .env
 #    -> http://127.0.0.1:8790
 ```
 
+### Docker
+
+```bash
+docker compose up -d          # 取 UPSTREAM_BASE_URL 等变量自 .env，账本持久化在命名卷
+curl localhost:8790/health
+docker compose down
+```
+
+镜像多阶段构建、非 root 运行、自带 healthcheck，约 290MB。
+
 ### 命令行
 
 ```bash
@@ -194,6 +208,15 @@ uv pip install --python .venv/Scripts/python.exe -e ".[dev]"   # pytest 在 dev 
 幂等（重复导入 0 新增）、三层预算边界、fail-closed、用量提取（OpenAI / DeepSeek / Ollama 三种口径）、
 SSE 流式捞 usage、代理端到端（转发/归因/熔断短路/上游故障）、对账 C1–C5。
 
+CI（GitHub Actions）在 3.10 / 3.11 / 3.12 三个版本上跑测试，并额外跑一个 `claims` 任务 ——
+它把下面那张「可证伪声明」表逐条执行，任何一条对不上就让构建变红：
+
+```bash
+python scripts/verify_claims.py
+# 通过 5 / 失败 0
+# ✅ 全部可证伪声明成立
+```
+
 ---
 
 ## 明确不做
@@ -207,7 +230,9 @@ SSE 流式捞 usage、代理端到端（转发/归因/熔断短路/上游故障�
 
 ## 可证伪声明
 
-以下每条都可以在本仓库里当场验证，对不上就是我在吹：
+以下每条都可以在本仓库里当场验证，对不上就是我在吹。这张表已被编译成 CI 任务 —— 声明失真 = 构建失败。
+
+一条命令跑全部：`python scripts/verify_claims.py`
 
 | 声明 | 验证方式 |
 |:--|:--|

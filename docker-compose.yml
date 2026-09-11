@@ -1,0 +1,30 @@
+services:
+  ledger:
+    build: .
+    image: llm-cost-ledger:0.1.0
+    ports:
+      - "8790:8790"
+    environment:
+      # 上游LLM服务（OpenAI 兼容）。未设置时启动即报错，不给魔法默认值
+      UPSTREAM_BASE_URL: ${UPSTREAM_BASE_URL:?请在 .env 或环境变量里设置 UPSTREAM_BASE_URL}
+      UPSTREAM_API_KEY: ${UPSTREAM_API_KEY:-}
+      UPSTREAM_TIMEOUT_S: ${UPSTREAM_TIMEOUT_S:-120}
+      # 代理自身鉴权（留空=不校验，建议仅在可信网络内留空）
+      PROXY_AUTH_KEY: ${PROXY_AUTH_KEY:-}
+      # 预算规则 JSON
+      BUDGET_RULES: ${BUDGET_RULES:-[]}
+      LEDGER_DB: /data/ledger.db
+      LEDGER_DEFAULT_USER: ${LEDGER_DEFAULT_USER:-anonymous}
+      LEDGER_DEFAULT_FEATURE: ${LEDGER_DEFAULT_FEATURE:-}
+    volumes:
+      - ledger-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8790/health',timeout=3).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 5s
+      retries: 3
+
+volumes:
+  ledger-data:
