@@ -11,4 +11,5 @@ ledger.db*
 config.json
 examples/_*/
 examples/_seed.py
+examples/_q.py
 proxy.log

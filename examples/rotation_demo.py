@@ -23,7 +23,9 @@ sys.path.insert(0, str(ROOT / "src"))
 from llm_cost_ledger.reconcile import run_reconcile  # noqa: E402
 from llm_cost_ledger.store import Ledger  # noqa: E402
 
-DEMO_DIR = ROOT / "examples" / "_demo"
+# 独立的临时目录 —— 不要和 seed_demo.py 的 examples/_demo 共用：
+# 那个目录可能正被运行中的代理进程锁着，两者相撞会让 demo 删不掉自己的库。
+DEMO_DIR = ROOT / "examples" / "_tmp_rotation"
 N_CALLS = 25
 MODEL = "deepseek-chat"
 IN_TOKENS = 12_000

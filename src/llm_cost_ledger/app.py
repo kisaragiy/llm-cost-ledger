@@ -8,20 +8,25 @@
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import datetime, timezone
 from urllib.parse import quote
 from typing import Any, AsyncIterator, Mapping
 
 import httpx
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from pathlib import Path
 
-from . import __version__, extract, pricing
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+
+from . import __version__, extract, insights, pricing
 from .budget import load_rules, decide, TIER_STOP
 from .config import Settings, load_settings
-from .identity import _canonical  # noqa: PLC2701 - 内部工具，同包使用
 from .spend import LedgerSpendLookup
 from .store import Ledger
+
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+DASHBOARD_HTML = STATIC_DIR / "dashboard.html"
 
 
 def _now() -> str:
@@ -81,6 +86,29 @@ def create_app(
             "calls_recorded": ledger.count_calls(),
             "total_cost_usd": round(ledger.total_cost(), 8),
         }
+
+    @app.get("/", response_class=HTMLResponse)
+    async def dashboard() -> HTMLResponse:
+        """看板页面。单文件、零外部依赖 —— 断网也能打开。"""
+        if not DASHBOARD_HTML.is_file():
+            return HTMLResponse("<h1>看板文件缺失</h1><p>static/dashboard.html 未随包安装</p>", status_code=500)
+        return HTMLResponse(DASHBOARD_HTML.read_text(encoding="utf-8"))
+
+    @app.get("/v1/ledger/overview")
+    async def overview(
+        days: int = Query(default=30, ge=1, le=365, description="趋势天数"),
+        _: None = Depends(require_auth),
+    ) -> dict[str, Any]:
+        """看板一次拉取的全部数据（总量 / 趋势 / 三维榜单 / 预算 / 告警）。"""
+        return insights.build_overview(ledger, rules, days=days)
+
+    @app.get("/v1/ledger/budget")
+    async def budget_view(_: None = Depends(require_auth)) -> dict[str, Any]:
+        return {"rules": insights.budget_status(ledger, rules)}
+
+    @app.get("/v1/ledger/alerts")
+    async def alerts_view(_: None = Depends(require_auth)) -> dict[str, Any]:
+        return insights.alerts(ledger)
 
     @app.get("/v1/ledger/config")
     async def show_config(_: None = Depends(require_auth)) -> dict[str, Any]:
@@ -169,13 +197,20 @@ def create_app(
 
         client = httpx.AsyncClient(timeout=settings.upstream_timeout_s, transport=transport)
 
-        def record(usage, status: str, raw_cost: Any = None) -> None:
+        def record(usage, status: str, raw_cost: Any = None, upstream_id: str | None = None) -> None:
+            """每次实时转发都是一条真记录，身份一律用本地 UUID。
+
+            为什么不信上游 id：实测 ollama 返回的是 `chatcmpl-222` 这种可复用的计数式 id，
+            OpenAI 系虽唯一但无法对所有兼容后端打包票。上游 id 复用一次，就压掉一笔真实花费。
+            代价只是：从本地日志重导时需要保留 UUID 字段才能去重 —— 而导出本身就带着它。
+            """
             payload = {
                 "provider": settings.upstream_base_url,
                 "model": body.get("model", ""),
                 "endpoint": "/v1/chat/completions",
                 "ts": _now(),
                 "status": status,
+                "request_id": f"live-{uuid.uuid4().hex}",
                 **attr,
                 **(usage.as_dict() if usage else {}),
                 "raw_cost_usd": raw_cost,
@@ -203,7 +238,8 @@ def create_app(
                 return JSONResponse(status_code=resp.status_code, content=_safe_json(resp.text))
             data = _safe_json(resp.text)
             usage = extract.parse_usage(data if isinstance(data, Mapping) else None)
-            record(usage, status="ok")
+            up_id = data.get("id") if isinstance(data, Mapping) else None
+            record(usage, status="ok", upstream_id=up_id)
             await client.aclose()
             return JSONResponse(content=data, headers=warn_header)
 

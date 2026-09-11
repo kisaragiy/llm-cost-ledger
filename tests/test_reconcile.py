@@ -35,22 +35,32 @@ class TestCleanLedger:
         assert second["suppressed"] > 0
 
 
-class TestC1IdentityUniqueness:
-    def test_duplicate_identity_is_an_error(self, ledger):
+class TestC1IdentityConsistency:
+    def test_inconsistent_identity_row_is_an_error(self, ledger):
         ledger.ingest([rec()])
-        # 绕过主键约束，模拟「去重被破坏」的账本
+        # 模拟「绕过身份分配逻辑」写入的脏行：键与 (指纹, 序号) 对不上
         ledger._conn().execute(
             "INSERT INTO calls (call_key, fingerprint, occurrence, ts, cost_usd, ingested_at)"
-            " VALUES ('dup', 'FP', 0, '2026-09-11T00:00:00', 1.0, '2026-09-11T00:00:00')"
-        )
-        ledger._conn().execute(
-            "INSERT INTO calls (call_key, fingerprint, occurrence, ts, cost_usd, ingested_at)"
-            " VALUES ('dup2', 'FP', 0, '2026-09-11T00:00:00', 1.0, '2026-09-11T00:00:00')"
+            " VALUES ('FP:99', 'FP', 0, '2026-09-11T00:00:00', 1.0, '2026-09-11T00:00:00')"
         )
         ledger._conn().commit()
         report = run_reconcile(ledger)
         assert report.ok is False
         assert any(f.code == "C1" for f in report.findings)
+
+    def test_clean_ledger_has_self_consistent_keys(self, ledger):
+        ledger.ingest([rec(), rec()])
+        assert not any(f.code == "C1" for f in run_reconcile(ledger).findings)
+
+    def test_request_identity_rows_not_flagged(self, ledger):
+        """请求身份行内容可以相同 —— 不该被 C1 误报。"""
+        ledger.ingest([
+            {**rec(), "request_id": "live-a"},
+            {**rec(), "request_id": "live-b"},
+        ])
+        report = run_reconcile(ledger)
+        assert not any(f.code == "C1" for f in report.findings), report.render()
+        assert report.totals["calls"] == 2
 
 
 class TestC2Recompute:

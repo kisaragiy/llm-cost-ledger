@@ -34,7 +34,10 @@ app.py      →  pricing.py   →  identity.py  →  store.py    →  budget.py
 | `app.py` | FastAPI：代理 + 账本 API |
 | `reconcile.py` | 对账 CLI，五道检查，不过则非零退出 |
 | `cli.py` | 命令行入口 |
+| `insights.py` | 看板聚合层：趋势（缺失日期补 0）、预算状态、告警聚合。纯函数，可单测 |
+| `static/dashboard.html` | 看板页面。单文件、零外部依赖（断网可用），手写 SVG 图表 |
 | `scripts/verify_claims.py` | 逐条执行 README 的可证伪声明，任一条不成立则非零退出（CI 的 claims 任务） |
+| `scripts/seed_demo.py` | 造 30 天演示数据，供看板预览与截图 |
 | `Dockerfile` / `docker-compose.yml` | 多阶段构建、非 root、healthcheck；一行起服务 |
 | `.github/workflows/ci.yml` | 三个 job：测试矩阵 / 声明验证 / 镜像构建+容器健康检查 |
 

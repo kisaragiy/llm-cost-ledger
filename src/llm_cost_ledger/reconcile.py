@@ -4,7 +4,8 @@
 本模块回答一个问题：**账本里的数字，凭什么让人信？**
 
 五道检查，任一条不过就以非零码退出（可以直接挂进 CI）：
-  C1 身份唯一性   同一 (fingerprint, occurrence) 不得出现两行 —— 结构性地证明去重生效
+  C1 身份自洽性   内容身份行的 call_key 必须等于 fingerprint:occurrence，请求身份行必须带 req:/live- 前缀
+                  —— 抓出绕过 assign_identities() 直接写入的脏行（旧版本代码 / 手工 SQL / 迁移残留）
   C2 逐行重算     用每行的 price_quote 重算总额，与 cost_usd 对平
   C3 未计价暴露   命中不了价格表的调用必须显式计数，不允许静默按 0 元入账
   C4 压制可追溯   每个导入批次的「压掉多少条」必须留痕，防止去重去过头没人知道
@@ -84,16 +85,20 @@ def run_reconcile(ledger: Ledger, drift_threshold: float = DRIFT_THRESHOLD) -> R
     suppressed = int(batch_row["s"])
 
     # --- C1 身份唯一性 ---
-    dup = conn.execute(
-        """SELECT fingerprint, occurrence, COUNT(*) AS n
-             FROM calls GROUP BY fingerprint, occurrence HAVING n > 1"""
+    # 主键已保证 call_key 唯一，所以「(指纹,序号) 重复」结构上不可能。
+    # C1 改为校验身份自洽性：内容身份行的键必须能从 (指纹,序号) 重建出来。
+    bad_identity = conn.execute(
+        """SELECT call_key, fingerprint, occurrence FROM calls
+            WHERE call_key NOT LIKE 'req:%' AND call_key NOT LIKE 'live-%'
+              AND call_key != fingerprint || ':' || occurrence
+            LIMIT 5"""
     ).fetchall()
-    if dup:
+    if bad_identity:
         findings.append(
             Finding(
                 "C1", SEVERITY_ERROR,
-                f"发现 {len(dup)} 组重复身份 —— 去重失效",
-                {"示例": [dict(r) for r in dup[:5]]},
+                f"发现 {len(bad_identity)} 行身份不自洽（绕过身份分配逻辑写入的脏行）",
+                {"示例": [dict(r) for r in bad_identity]},
             )
         )
 

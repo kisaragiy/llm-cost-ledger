@@ -162,11 +162,13 @@ def assign_identities(records: Sequence[Mapping[str, Any]]) -> list[IdentifiedRe
     for rec in records:
         req_id = str(rec.get("request_id") or "").strip()
         if req_id:
-            fp = f"req:{req_id}"
+            # 请求身份：上游给了 id 或本地为每次实时调用生成 —— 每次物理调用都是一条真记录。
+            # fingerprint 仍存内容指纹（分析用），但 call_key 不参与内容去重，
+            # 所以「同一秒内两次内容相同的真实调用」不会被误压。
             out.append(
                 IdentifiedRecord(
-                    call_key=fp,
-                    fingerprint=fp,
+                    call_key=f"req:{req_id}",
+                    fingerprint=fingerprint(rec),
                     occurrence=0,
                     payload=dict(record_of(rec)),
                 )

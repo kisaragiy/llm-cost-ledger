@@ -103,7 +103,9 @@ class TestOccurrence:
     def test_request_id_takes_priority(self):
         out = assign_identities([rec(request_id="req-abc")])
         assert out[0].call_key == "req:req-abc"
-        assert out[0].fingerprint == "req:req-abc"
+        # 指纹仍保留内容指纹（分析用），但 call_key 不参与内容去重
+        assert out[0].fingerprint == fingerprint(rec())
+        assert out[0].call_key != out[0].fingerprint
 
     def test_request_id_same_for_different_payloads_dedupes(self):
         out = assign_identities([rec(request_id="r1"), rec(model="gpt-4o", request_id="r1")])
@@ -112,6 +114,13 @@ class TestOccurrence:
     def test_request_id_and_fingerprint_do_not_collide(self):
         out = assign_identities([rec(), rec(request_id="r1")])
         assert out[0].call_key != out[1].call_key
+
+    def test_identical_content_with_distinct_request_ids_kept_apart(self):
+        """实时流量场景：同一秒两次内容相同的真实调用，靠 request_id 区分，都必须留下。"""
+        out = assign_identities([rec(request_id="live-a"), rec(request_id="live-b")])
+        assert out[0].fingerprint == out[1].fingerprint   # 内容相同
+        assert out[0].call_key != out[1].call_key         # 但仍视为两条
+        assert out[0].occurrence == out[1].occurrence == 0
 
     def test_dedupe_keys_helper(self):
         keys = dedupe_keys([rec(), rec()])

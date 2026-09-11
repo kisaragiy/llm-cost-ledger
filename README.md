@@ -142,6 +142,27 @@ HTTP_CODE=503
 
 ---
 
+## 看板
+
+`http://127.0.0.1:8790/` —— 单文件、**零外部网络依赖**（断网可打开，不加载任何 CDN）。
+
+![账目控制台](docs/dashboard.png)
+
+一屏覆盖四件事：
+
+| 区域 | 内容 |
+|:--|:--|
+| 总量条 | 累计 / 今日 / 近 24 小时 / 本月（四个窗口各算各的，不是同一口径） |
+| 花费趋势 | 按日聚合。**没有调用的日期补 0** —— 不补零会让图表跳过空档，把趋势形状抹平 |
+| 预算水位 | 每条规则一根条，颜色随 tier 变化（ok / warn / ask / stop） |
+| 三维榜单 | 按模型 / 用户 / 功能，花费降序 |
+| 导入批次审计 | 每次导入的 看到 / 入库 / 压制 —— 去重行为可追溯，压掉多少条一目了然 |
+| 告警 | 未计价调用、价格漂移（按模型聚合取最差）、失败调用 |
+
+同源 JSON 接口：`GET /v1/ledger/overview?days=30`（另有 `/budget`、`/alerts`）。
+
+---
+
 ## 部署
 
 ```bash
@@ -193,6 +214,10 @@ ledger pricing                              # 查看价格表
 | `POST /v1/ledger/ingest` | 批量导入调用记录 |
 | `GET /v1/ledger/batches` | 导入批次审计 |
 | `GET /v1/ledger/pricing` | 当前价格表 |
+| `GET /v1/ledger/overview?days=N` | 看板一次拉取的全部数据 |
+| `GET /v1/ledger/budget` | 每条预算规则的 spent / limit / ratio / tier |
+| `GET /v1/ledger/alerts` | 未计价 / 价格漂移 / 失败调用 |
+| `GET /` | 看板页面 |
 
 ---
 
@@ -201,10 +226,10 @@ ledger pricing                              # 查看价格表
 ```bash
 uv pip install --python .venv/Scripts/python.exe -e ".[dev]"   # pytest 在 dev extra 里
 .venv/Scripts/python.exe -m pytest tests/ -q
-# 171 passed in 4.52s
+# 220 passed in 6.07s
 ```
 
-覆盖：身份键（含行号位移不变性）、计费口径（缓存/reasoning 不重复计价）、
+覆盖：身份键（含行号位移不变性、实时流量不误压）、计费口径（缓存/reasoning 不重复计价）、
 幂等（重复导入 0 新增）、三层预算边界、fail-closed、用量提取（OpenAI / DeepSeek / Ollama 三种口径）、
 SSE 流式捞 usage、代理端到端（转发/归因/熔断短路/上游故障）、对账 C1–C5。
 
@@ -213,7 +238,7 @@ CI（GitHub Actions）在 3.10 / 3.11 / 3.12 三个版本上跑测试，并额�
 
 ```bash
 python scripts/verify_claims.py
-# 通过 5 / 失败 0
+# 通过 6 / 失败 0
 # ✅ 全部可证伪声明成立
 ```
 
@@ -239,8 +264,9 @@ python scripts/verify_claims.py
 | 重复导入不产生新花费 | `python examples/rotation_demo.py`，观察第 2 次导入 `入库 0 条` |
 | 对账能抓出账目异常 | 篡改任意一行 `cost_usd` 后跑 `ledger reconcile`，退出码应为 1 |
 | 熔断发生在上游调用之前 | 把 `UPSTREAM_BASE_URL` 指向不可达地址并设超限预算，应得 `402` 而非连接错误 |
-| 171 个测试通过 | `pytest tests/ -q` |
+| 220 个测试通过 | `pytest tests/ -q` |
 | 免费模型不会被误判为未计价 | `ledger pricing` 中 `qwen3.5:9b` 单价为 0，但 `unpriced` 计数不增加 |
+| 看板断网可用 | 页面不引用任何外部主机（`verify_claims.py` 正则扫描 HTML 断言） |
 
 ---
 

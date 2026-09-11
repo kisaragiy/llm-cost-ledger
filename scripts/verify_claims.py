@@ -209,6 +209,24 @@ def claim_free_model_not_unpriced() -> None:
           "qwen3.5:9b 单价 0 但 unpriced=False" if ok else f"unpriced={quote.unpriced} cost={quote.cost_usd}")
 
 
+# --------------------------------------------------------------------------
+# 声明 6：看板零外部网络依赖（断网可用）
+# --------------------------------------------------------------------------
+def claim_dashboard_offline() -> None:
+    import re
+
+    html_path = ROOT / "src" / "llm_cost_ledger" / "static" / "dashboard.html"
+    if not html_path.is_file():
+        check("声明6 看板零外部依赖", False, "找不到 dashboard.html")
+        return
+    html = html_path.read_text(encoding="utf-8")
+    external = re.findall(r'(?:src|href)\s*=\s*["\'](https?://[^"\']+)', html)
+    external += re.findall(r'@import\s+url\(["\']?(https?://[^)"\']+)', html)
+    ok = not external
+    check("声明6 看板零外部网络依赖", ok,
+          "页面不引用任何外部主机，断网可打开" if ok else f"引用了外部资源：{external}")
+
+
 def main() -> int:
     print("=" * 66)
     print("验证 README「可证伪声明」")
@@ -218,6 +236,7 @@ def main() -> int:
     claim_fuse_before_upstream()
     claim_tests_exist()
     claim_free_model_not_unpriced()
+    claim_dashboard_offline()
     print("-" * 66)
     print(f"通过 {len(PASSED)} / 失败 {len(FAILED)}")
     if FAILED:

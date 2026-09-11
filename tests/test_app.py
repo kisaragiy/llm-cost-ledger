@@ -284,6 +284,135 @@ class TestLedgerEndpoints:
         assert "deepseek-chat" in body["models"]
 
 
+class TestProxyNeverDropsRealCalls:
+    """回归：实时流量的每一条都必须落账。
+
+    曾经的 bug：实时调用逐条入库，每条自成一个批次 -> occurrence 恒为 0 ->
+    同一秒内内容相同的 N 次真实调用被当成「重复导入」压掉，只留 1 条 = 少记账。
+    上游 id 也不能当身份 —— 实测 ollama 返回可复用的 `chatcmpl-222`。
+    """
+
+    def test_three_identical_calls_all_recorded(self, tmp_path):
+        client, ledger, _ = make_client(tmp_path)
+        for _ in range(3):
+            client.post("/v1/chat/completions", json={"model": "deepseek-chat", "messages": []})
+        assert ledger.count_calls() == 3
+
+    def test_repeated_same_upstream_id_still_all_recorded(self, tmp_path):
+        """上游复用 id 也不许压掉任何一条。"""
+        fake = FakeUpstream(payload={"id": "chatcmpl-1", "choices": [],
+                                     "usage": {"prompt_tokens": 10, "completion_tokens": 5}})
+        client, ledger, _ = make_client(tmp_path, fake=fake)
+        for _ in range(5):
+            client.post("/v1/chat/completions", json={"model": "deepseek-chat", "messages": []})
+        assert ledger.count_calls() == 5
+        assert ledger.total_cost() > 0
+
+    def test_cost_scales_with_call_count(self, tmp_path):
+        client, ledger, _ = make_client(tmp_path)
+        one = client.post("/v1/chat/completions", json={"model": "deepseek-chat", "messages": []})
+        assert one.status_code == 200
+        after_one = ledger.total_cost()
+        for _ in range(4):
+            client.post("/v1/chat/completions", json={"model": "deepseek-chat", "messages": []})
+        assert ledger.total_cost() == pytest.approx(after_one * 5)
+
+    def test_distinct_users_same_content_both_kept(self, tmp_path):
+        client, ledger, _ = make_client(tmp_path, default_user="")
+        for u in ("alice", "alice", "bob"):
+            client.post("/v1/chat/completions", json={"model": "deepseek-chat", "messages": []},
+                        headers={"x-ledger-user": u})
+        assert ledger.count_calls() == 3
+        assert ledger.count_calls(user_id="alice") == 2, "同一用户同一秒的两次真实调用都要记账"
+
+    def test_reimport_of_exported_proxy_records_still_dedupes(self, tmp_path):
+        """反面：带着 request_id 的记录重导，仍应幂等 —— 去重能力没被削弱。"""
+        client, ledger, _ = make_client(tmp_path)
+        for _ in range(3):
+            client.post("/v1/chat/completions", json={"model": "deepseek-chat", "messages": []})
+        rows = [dict(r) for r in ledger._conn().execute(
+            "SELECT * FROM calls").fetchall()]  # noqa: SLF001
+        exported = [
+            {
+                "request_id": r["call_key"].split("req:", 1)[-1],
+                "provider": r["provider"], "model": r["model"], "ts": r["ts"],
+                "prompt_tokens": r["prompt_tokens"], "completion_tokens": r["completion_tokens"],
+                "user_id": r["user_id"], "feature": r["feature"], "status": r["status"],
+            }
+            for r in rows
+        ]
+        report = ledger.ingest(exported, source="reimport")
+        assert report.inserted == 0
+        assert ledger.count_calls() == 3
+
+
+class TestDashboard:
+    """看板：页面本身 + 背后的聚合端点。"""
+
+    def test_dashboard_served(self, tmp_path):
+        client, _, _ = make_client(tmp_path)
+        r = client.get("/")
+        assert r.status_code == 200
+        assert "账目控制台" in r.text
+        assert r.headers["content-type"].startswith("text/html")
+
+    def test_dashboard_has_no_external_dependencies(self, tmp_path):
+        """AC3 —— 断网可用：页面不得引用任何外部主机。"""
+        import re
+
+        client, _, _ = make_client(tmp_path)
+        html = client.get("/").text
+        external = re.findall(r'(?:src|href)\s*=\s*["\'](https?://[^"\']+)', html)
+        external += re.findall(r'@import\s+url\(["\']?(https?://[^)"\']+)', html)
+        assert external == [], f"页面引用了外部资源：{external}"
+
+    def test_dashboard_renders_without_inline_cdn_fonts(self, tmp_path):
+        client, _, _ = make_client(tmp_path)
+        html = client.get("/").text
+        assert "fonts.googleapis" not in html and "cdn." not in html
+
+    def test_dashboard_does_not_need_auth_to_load_page(self, tmp_path):
+        """页面本身公开；数据接口才要鉴权 —— 否则用户没法输密钥。"""
+        client, _, _ = make_client(tmp_path, proxy_auth_key="secret")
+        assert client.get("/").status_code == 200
+        assert client.get("/v1/ledger/overview").status_code == 401
+
+    def test_overview_shape(self, tmp_path):
+        client, _, _ = make_client(tmp_path)
+        client.post("/v1/chat/completions", json={"model": "deepseek-chat", "messages": []})
+        body = client.get("/v1/ledger/overview?days=7").json()
+        assert set(body) == {"totals", "series", "by_model", "by_user", "by_feature", "budget", "alerts"}
+        assert len(body["series"]) == 7
+
+    def test_overview_days_param_respected(self, tmp_path):
+        client, _, _ = make_client(tmp_path)
+        assert len(client.get("/v1/ledger/overview?days=45").json()["series"]) == 45
+
+    def test_overview_rejects_bad_days(self, tmp_path):
+        client, _, _ = make_client(tmp_path)
+        assert client.get("/v1/ledger/overview?days=0").status_code == 422
+        assert client.get("/v1/ledger/overview?days=9999").status_code == 422
+
+    def test_overview_totals_match_calls(self, tmp_path):
+        client, ledger, _ = make_client(tmp_path)
+        for _ in range(3):
+            client.post("/v1/chat/completions", json={"model": "deepseek-chat", "messages": []})
+        t = client.get("/v1/ledger/overview").json()["totals"]
+        assert t["calls"] == 3
+        assert t["all_time"] == pytest.approx(ledger.total_cost())
+
+    def test_budget_endpoint(self, tmp_path):
+        client, _, _ = make_client(
+            tmp_path, rules=[{"scope": "global", "window": "total", "limit_usd": 10}]
+        )
+        rules = client.get("/v1/ledger/budget").json()["rules"]
+        assert len(rules) == 1 and rules[0]["limit_usd"] == 10
+
+    def test_alerts_endpoint(self, tmp_path):
+        client, _, _ = make_client(tmp_path)
+        assert "unpriced" in client.get("/v1/ledger/alerts").json()
+
+
 class TestUpstreamFailures:
     def test_unreachable_upstream_returns_503_with_chinese(self, tmp_path):
         """上游连不上时不能给裸 500 —— 要说清楚是哪儿连不上。"""
